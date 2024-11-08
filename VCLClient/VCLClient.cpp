@@ -86,12 +86,10 @@ int main() {
 
         sf::SoundBuffer buffer;
         buffer = recorder.getBuffer();
-
         sf::Packet packet;
         packet << buffer.getSampleCount() << buffer.getChannelCount() << buffer.getSampleRate();
         packet.append(buffer.getSamples(), buffer.getSampleCount() * sizeof(sf::Int16));
-        client->send(packet); // TODO: Comprimir paquete antes de enviarlo.
+        client->send(packet);
     }
-
     return 0;
 }
