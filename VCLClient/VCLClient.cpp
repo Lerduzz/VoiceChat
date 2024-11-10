@@ -5,7 +5,14 @@
 #include <iostream>
 #include <thread>
 
-sf::IpAddress serverAddress("192.168.10.153");
+enum PacketOpcode
+{
+    CMSG_VCL_PING,
+    CMSG_VCL_AUDIO,
+    SMSG_VCL_AUDIO
+};
+
+sf::IpAddress serverAddress("sking.lerduzz.com");
 sf::Uint16 port = 8000;
 
 static void playSoundThread(sf::SoundBuffer* buffer) {
@@ -20,36 +27,64 @@ static void playSoundThread(sf::SoundBuffer* buffer) {
 static void receiveThread(sf::TcpSocket* client) {
     std::cout << "* ReceiveThread(): Inicializando para escuchar." << std::endl;
     while (true) {
-        sf::Packet* packet = new sf::Packet();
-        sf::Socket::Status st = client->receive(*packet);
-        if (st == sf::Socket::Disconnected || st == sf::Socket::Error)
+        sf::Packet packet;
+        sf::Socket::Status st = client->receive(packet);
+        if (st == sf::Socket::Done)
         {
-            client->disconnect();
-            while (client->connect(serverAddress, port) != sf::Socket::Done)
+            sf::Uint32 opcode;
+            packet >> opcode;
+            switch (opcode)
             {
-                std::cout << "* Intentando conectar al servidor." << std::endl;
-                sf::sleep(sf::milliseconds(1000));
+                case SMSG_VCL_AUDIO:
+                {
+                    std::cout << "* ReceiveThread(): Se ha recibido audio." << std::endl;
+                    sf::Uint64 sampleCount;
+                    unsigned int channelCount;
+                    unsigned int sampleRate;
+                    packet >> sampleCount >> channelCount >> sampleRate;
+                    sf::SoundBuffer* buffer = new sf::SoundBuffer();
+                    buffer->loadFromSamples(reinterpret_cast<const sf::Int16*>(packet.getData()), sampleCount, channelCount, sampleRate);
+                    std::thread sThread(&playSoundThread, buffer);
+                    sThread.detach();
+                    break;
+                }
+                default:
+                {
+                    std::cout << "* ReceiveThread(): Se ha recibido un opcode desconocido (" << opcode << ")." << std::endl;
+                    break;
+                }
             }
-            std::cout << "* Conectado correctamente al servidor." << std::endl;
-            continue;
         }
-        if (st == sf::Socket::NotReady)
-            continue;
-        std::cout << "* ReceiveThread(): Se ha recibido audio." << std::endl;
-        sf::Uint64 sampleCount;
-        unsigned int channelCount;
-        unsigned int sampleRate;
-        *packet >> sampleCount >> channelCount >> sampleRate;
-
-        sf::SoundBuffer* buffer = new sf::SoundBuffer();
-        buffer->loadFromSamples(reinterpret_cast<const sf::Int16*>(packet->getData()), sampleCount, channelCount, sampleRate);
-
-        std::thread sThread(&playSoundThread, buffer);
-        sThread.detach();
+        else
+        {
+            if (st == sf::Socket::Disconnected)
+            {
+                client->disconnect();
+                while (client->connect(serverAddress, port) != sf::Socket::Done)
+                {
+                    std::cout << "* Intentando conectar al servidor." << std::endl;
+                    sf::sleep(sf::milliseconds(1000));
+                }
+                std::cout << "* Conectado correctamente al servidor." << std::endl;
+            }
+        }
     }
 }
 
-int main() {
+static void pingThread(sf::TcpSocket* client)
+{
+    while (true)
+    {
+        sf::sleep(sf::milliseconds(60000));
+        std::cout << "* Enviando ping para mantener la conexion activa." << std::endl;
+        sf::Packet packet;
+        packet << CMSG_VCL_PING;
+        client->send(packet);
+    }
+}
+
+int main()
+{
     sf::TcpSocket* client = new sf::TcpSocket();
 
     while (client->connect(serverAddress, port) != sf::Socket::Done)
@@ -63,7 +98,11 @@ int main() {
     std::thread thread(&receiveThread, client);
     thread.detach();
 
-    while (true) {
+    std::thread pThread(&pingThread, client);
+    pThread.detach();
+
+    while (true)
+    {
         if (!sf::Keyboard::isKeyPressed(sf::Keyboard::LControl))
             continue;
 
@@ -87,6 +126,7 @@ int main() {
         sf::SoundBuffer buffer;
         buffer = recorder.getBuffer();
         sf::Packet packet;
+        packet << CMSG_VCL_AUDIO;
         packet << buffer.getSampleCount() << buffer.getChannelCount() << buffer.getSampleRate();
         packet.append(buffer.getSamples(), buffer.getSampleCount() * sizeof(sf::Int16));
         client->send(packet);
