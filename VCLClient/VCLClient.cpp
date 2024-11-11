@@ -83,7 +83,7 @@ static void pingThread(sf::TcpSocket* client)
     while (running)
     {
         sf::sleep(sf::milliseconds(30000));
-        if (!clientConnected || !clientLoggedIn)
+        if (!clientConnected)
             continue;
         sf::Packet packet;
         packet << CMSG_VCL_PING;
